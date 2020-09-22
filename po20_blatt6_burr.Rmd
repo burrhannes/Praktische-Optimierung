@@ -1,0 +1,267 @@
+---
+title: "Blatt 6"
+author: "Burr & Lübeck"
+date: "7 6 2020"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Aufgabe 1
+
+$ f(x,y) = x y $
+s.t: $ y = x - 2 $
+
+Elimination von y:
+
+$ f(x) = x^2 - 2x $
+
+Diese Funktion soll opitmiert werden. Ich gehe davon aus, dass damit Minimierung gemeint ist.
+
+```{r}
+library(ggplot2)
+
+fx = function(x) x**2 - 2*x
+
+fxy = function(x) x[1] *x[2]
+
+
+optim(method="BFGS", fn=fx, par=0)
+
+
+```
+
+Optim konvergiert zu x=1 mit f(x)=-1.
+Durch Wiedereinsetzen in die Nebenbedingung ergibt sich y=-1.
+
+```{r, echo=FALSE}
+plot(x=1,y=-1,main= " Plot of one-dimensional Problem", xlab="x", ylab="f(x)")
+curve(fx, from=-5, to=5, n=500, add=TRUE)
+```
+Durch die Elimination wird das Problem im Eindimensionalen durch eine einfache, konvexe Parabel repräsentiert.
+
+```{r, echo= FALSE}
+grid = expand.grid(x=seq(from = -10,to=10, by = 0.1),
+                   y= seq(from= -10,to=10, by = 0.1))
+
+res = apply(X=grid, MARGIN=1, FUN=fxy)
+dataps =data.frame(grid, value=res)
+
+ggplot(data=dataps, mapping= aes(x=x, y=y, z=value)) +
+  geom_contour(bins=50) +
+  geom_abline(intercept= -2,slope = 1, color="black", size=0.5)
+
+
+```
+
+
+
+Die Isogewinnlinien zeigen in Richtung des Ursprungs bzw der Achsen. Allerdings sind wegen der Nebenbedinung nur die Punkte zugelassen, die auf der schwarzen Linie liegen. Daher ist die beste Lösung bei (1,-1).
+
+
+# Aufgabe 2
+```{r}
+one_lambda_ea = function(f,lambda=2,parent,evals,lower,upper,
+                         repair="border",
+                         method="plus", sigma0=0.0625, 
+                         tau=0.25){
+  
+  #initialize
+  n = length(parent)
+  sigma = sigma0
+  fitness_p = f(parent)
+  evals_left = evals -1
+  
+  while(evals_left > 0){
+    
+    #schwefel
+    sigma=sigma * exp(rnorm(n=1,mean=0,sd=tau))
+    lambda= min(lambda, evals_left)
+    children = parent + sigma * matrix(rnorm(lambda * n), nrow=n)
+    
+    # repair unvalid children
+    
+    # repair = border 
+    if(repair == "border"){
+      children[children < lower] = lower
+      children[children > upper] = upper
+    }
+    # repair = modulo
+    if(repair == "modulo"){
+      children[children < lower] = (upper - (lower- children[children < lower])) %% (upper - lower)
+      children[children > upper] = (lower + (children[children < lower] - upper)) %% (upper - lower)
+    }    
+    
+    # repair = mirror
+    if(repair=="mirror"){
+      children[children < lower] = lower + (lower - children[children < lower])
+      children[children >upper] = upper - (children[children < lower] - upper)
+    }
+    
+    
+    # evaluate children
+    fitness_c = apply(children,2,f)
+    evals_left = evals_left - lambda
+    
+    # selectionn
+    if(method == "plus") {
+      min_i = which.min(c(fitness_p, fitness_c))
+      parent = rbind(parent, t(children))[min_i, ]
+      fitness_p =c(fitness_p, fitness_c)[min_i]
+    }
+    else {
+      min_ind = which.min(fitness_c)
+      parent = children[, min_ind]
+      fitness_p = fitness_c[min_ind]
+    } 
+
+    }
+    return(list(x=parent, fx=fitness_p))
+  }
+  
+                         
+```
+
+```{r}
+f = function(x) x[1]^3 * sin(x[1]+1) - x[2]^3 * cos(x[2])
+```
+
+### Border Method
+```{r}
+
+set.seed(08062020)
+#imitialize randoms sample
+reps=1000
+pp = matrix(runif(reps, min=-10,max=10), ncol=2)
+
+
+df_b = data.frame(matrix(ncol=3, nrow=0))
+colnames(df_b) = c("X1", "X2", "Fx")
+
+# iterate over sample and save results in data frame
+for (i in 1:((reps/2)-1)){
+  
+ df_b[i,1] = one_lambda_ea(f,parent=pp[i,], evals=100,
+                            lower=-10,upper=10, method="border")$x[1]
+ df_b[i,2] = one_lambda_ea(f,parent=pp[i,], evals=100,
+                            lower=-10,upper=10, method="border")$x[2]
+ df_b[i,3] = one_lambda_ea(f,parent=pp[i,], evals=100,
+                            lower=-10,upper=10, method="border")$fx
+  
+}
+```
+### Mirror Method
+```{r}
+df_mi = data.frame(matrix(ncol=3, nrow=0))
+colnames(df_b) = c("X1", "X2", "Fx")
+for (i in 1:((reps/2)-1)){
+  
+ df_mi[i,1] = one_lambda_ea(f,parent=pp[i,], evals=100,
+                            lower=-10,upper=10, method="mirror")$x[1]
+ df_mi[i,2] = one_lambda_ea(f,parent=pp[i,], evals=100,
+                            lower=-10,upper=10, method="mirror")$x[2]
+ df_mi[i,3] = one_lambda_ea(f,parent=pp[i,], evals=100,
+                            lower=-10,upper=10, method="mirror")$fx
+  
+}
+```
+### Modulo Method
+```{r}
+df_mo = data.frame(matrix(ncol=3, nrow=0))
+colnames(df_b) = c("X1", "X2", "Fx")
+for (i in 1:((reps/2)-1)){
+  
+ df_mo[i,1] = one_lambda_ea(f,parent=pp[i,], evals=100,
+                            lower=-10,upper=10, method="modulo")$x[1]
+ df_mo[i,2] = one_lambda_ea(f,parent=pp[i,], evals=100,
+                            lower=-10,upper=10, method="modulo")$x[2]
+ df_mo[i,3] = one_lambda_ea(f,parent=pp[i,], evals=100,
+                            lower=-10,upper=10, method="modulo")$fx
+  
+}
+```
+
+```{r}
+opt_b = df_b[,3]
+
+opt_mi = df_mi[,3]
+
+opt_mo = df_mo[,3]
+
+```
+```{r}
+boxplot(opt_b,opt_mi,opt_mo,
+        ylab="f(x) of Optimum")
+```
+In den Boxplots ähneln sich die Verteilungen der gefundenen Optima der drei Einstellungen sehr stark.
+Da es einige Ausreiser gibt, wählen wir als Maß der zentralen Tendenz den Median.
+
+```{r}
+med_b = median(opt_b)
+
+med_mi = median(opt_mi)
+
+med_mo = median(opt_mo)
+
+barplot(height=c(med_b,med_mi,med_mo), horiz=TRUE, names.arg = c("border", "mirror", "modulo"), col="lightblue", main="Median Runtimes Dependent on Repair-Mechanism")
+
+```
+Plottet man nur die Mediane der 3 Varianten, lassen sich gewisse Unterschiede erkennen. Hier findet die Parametereinstellung "Modulo" im Schnitt die kleinsten, also besten Optima.
+Das ist - für mich - auf den ersten Blick überraschend, weil es die Variante ist, die die geringste Info beibehält.
+Vielleicht ist das aber auch gerade die Stärke, dass durch den Einsatz des Modulos zusätzliches "Chaos" erzeugt wird, was ja die Stärke von Evolutionären Algorithmen ist. Gerade hier, wo lokale Optima vor allem an den Rändern liegen, kann das helfen.
+
+
+```{r}
+wilcox.test(opt_b,opt_mo)
+
+```
+Wenn man allerdings die Unterschiede inferenzstatistisch absichern möchte, findet man keinen signifikanten Unterschied, was bei einer doch großen Stichprobe von n=500 durchaus gegen einen starken Effekt spricht.
+Die deskriptiven Unterschiede sollten also mit Vorsicht interpretiert werden.
+
+
+# Aufgabe 3
+```{r}
+strafopt = function(f,g,h,
+                    xnull=0,ceta=1,gamma=2,
+                    evals=100){
+  ############################################
+  #Iterative approach to loss function optimazitation
+  #f: target function
+  #g & h: inequality constraints with zero
+  #(which is no restriction of generality)
+  
+  
+  
+  #intit
+  k = 1
+  c = ceta
+  x_k = xnull
+  evals_left = evals
+  
+  while (evals_left>0){  #give a maximal budget
+
+    res = optim(fn=(f+c*g+c*h),par=x_k, method="BFGS")
+    x_k = res$x
+    
+    if (g(x_k)<=0 & h(x_k)<=0){
+      break  ## valid result is found: break loop
+      
+    }
+    else{
+      k = k+1
+      c = gamma * c
+      next #continue with next iteration
+      
+    }
+  
+  }
+  return(res)
+
+
+}
+```
+
+
+

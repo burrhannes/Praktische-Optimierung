@@ -1,0 +1,351 @@
+---
+title: "Blatt 7"
+author: 'Burr, Lübeck, & Ott '
+date: "19 6 2020"
+output:
+  pdf_document: default
+  pdf: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+
+# Aufgabe 2
+
+MBO findet Anwendung, wenn aus unterschiedlichen Gründen die Auswertung der Zielfunktion sehr teuer oder gar unmöglich ist. Stattdessen, versucht man sie durch ein Metamodell zu approximieren, welches im Laufe der Optimierung zielgerichtet immer genauer wird, indem man "interessante", also "vielversprechende" Bereiche identifiziert.
+Man beginnt mit einem initialen Design. Dies könnte man durch völlig zufällige Punkte oder durch ein Raster verwirklichen. Die intelligentere Variante ist das Latin Hypercupe Design, das einen sinnvollen Kompromiss zwischen Abdeckung und Zufälligkeit darstellt.
+An den gewählten Stellen wertet man die Zielfunktion aus.
+Auf Basis dieser Punkte wird nun ein Metamodell M geschätzt. Durch eine Modelloptimierung werden "vielversprechende" Stellen identifiziert, an denen eine weitere Funktionsauswertung lohnend erscheint. Diese werden zum bisherigen Design hinzugefügt. Das wird wiederholt, bis ein Stoppkriterium, zum Beispiel ein erschöpftes Budget, erreicht ist.
+Das Model und das beste Design werden zurückggegeben.
+
+In der Spezifikation des Algorithmus, muss man sich überlegen, wie man "vielversprechend" umsetzen kann.
+Zu diesem Zwecke ist es wichtig, dass das Metamodell in der Lage ist, Unsicherheit zu beziffern.
+Bei "Lower Confidence Bound" wählt man einen Hyperparameter $\kappa$, der den  "Optimismus, dass man sich noch verbessern kann" repräsentiert. $\kappa$ multipliziert man mit der Unsicherheit an jeder Stelle und zieht das Ganze vom geschätzten Wert ab.
+Bei "Expected Improvement" macht man eine Normalverteilungsannahme und schätzt so die erwartete Verbesserung an jeder Stelle.
+Bei beiden Varianten wählt man dann die Stelle des niedrigsten, also besten, zu erwartetenden Wert.
+
+
+```{r, echo=FALSE,results='hide'}
+fx = function(x) x**2 - 10*cos(5*x)
+fxy = function(x,y) x**2 *(1+cos(y))+ y**2 * sin(x)
+
+library("ParamHelpers")
+library("mlr")
+
+library("checkmate")
+library("smoof")
+library("mlrMBO")
+library("Rcpp")
+library("RSNNS")
+library("DiceKriging")
+library("lhs")
+
+```
+## Initiales Design per Latin Hypercube
+
+```{r}
+set.seed(7.2)
+lhsa = improvedLHS(5,1) #5 Punkte im 1D
+lhsb = improvedLHS(10,2) # 10 Punkte in 2D
+
+#Skalieren:
+lhsa_sc = (lhsa * 20) -10 
+lhsb_sc = (lhsb * 20) - c(10,10)
+
+#In DF benennen
+dfa = data.frame(lhsa_sc)
+colnames(dfa) = "x"
+
+dfb=data.frame(lhsb_sc)
+colnames(dfb)= c("x1","x2")
+
+```
+## Funtion a)
+```{r}
+obj.fun = makeSingleObjectiveFunction(
+  fn = function(x) x**2 - 10*cos(5*x),
+  par.set = makeNumericParamSet(id="x", lower=-10,upper=10, len=1)
+)
+```
+### Expected Improvement
+```{r}
+surr.km = makeLearner("regr.km", predict.type="se", covtype="matern3_2", 
+                      control=list(trace=FALSE))
+# so wird laut Dokumentation ein Krieging Meta-Modell erstellt
+control = makeMBOControl()
+control = setMBOControlTermination(control, iters=10)
+control = setMBOControlInfill(control, crit=makeMBOInfillCritEI())
+
+run_EI_a = mbo(obj.fun, design=dfa, learner = surr.km, control=control, show.info = FALSE)
+
+```
+EI:
+Recommended parameters:
+x=1.24
+Objective: y = -8.431
+
+###Lower Confidence Bound
+Hier haben wir das Infill-Kriterium gewählt, bei dem $\kappa$ automatisch gewählt wird.
+```{r}
+control_CB = makeMBOControl()
+control_CB = setMBOControlTermination(control_CB, iters=10)
+control_CB = setMBOControlInfill(control_CB, crit=makeMBOInfillCritCB())
+# "Confidence Bound with lambda automatically chosen"
+run_CB_a = mbo(obj.fun, design=dfa, learner = surr.km, control=control_CB, show.info = FALSE)
+```
+LCB:
+Recommended parameters:
+x=1.24
+Objective: y = -8.431
+
+
+Beide Infill-Kriterien kommen zum gleichen Ergebnis.
+
+## Funtion b)
+```{r}
+obj.fxy = makeSingleObjectiveFunction(
+  fn = function(x) x[1]**2 *(1+cos(x[2]))+ x[2]**2 * sin(x[1]),
+  par.set = makeNumericParamSet(id="x", lower=-10,upper=10, len=2)
+)
+```
+
+### Expected Improvement
+```{r}
+ctrl_EI = makeMBOControl()
+ctrl_EI = setMBOControlTermination(ctrl_EI, iters=15)
+ctrl_EI = setMBOControlInfill(ctrl_EI, crit=makeMBOInfillCritEI())
+run_EI_b = mbo(obj.fxy, design=dfb, learner = surr.km, control=ctrl_EI, show.info = FALSE)
+
+```
+EI:
+Recommended parameters:
+x=-1.54,10
+Objective: y = -99.537
+
+
+### Lower Cofnidence Bound
+```{r}
+ctrl_CB = makeMBOControl()
+ctrl_CB = setMBOControlTermination(ctrl_CB, iters=15)
+ctrl_CB = setMBOControlInfill(ctrl_CB, crit=makeMBOInfillCritCB())
+run_CB_b = mbo(obj.fxy, design=dfb, learner = surr.km, control=ctrl_CB, show.info = FALSE)
+```
+
+CB:
+Recommended parameters:
+x=-1.57,10
+Objective: y = -99.586
+
+## Plotting
+
+```{r, echo=FALSE,results='hide',fig.keep='all'}
+library("checkmate")
+library("ggplot2")
+library("ggrepel")
+
+temp = c(-100:100)
+x = t(t(temp/10))
+fvalues = t(t(fx(x)))
+EI_a_datapoints = print(run_EI_a)
+EI_a_x = t(t(EI_a_datapoints$x))
+EI_a_y = t(t(EI_a_datapoints$y))
+
+CB_a_datapoints = print(run_CB_a)
+CB_a_x = t(t(CB_a_datapoints$x))
+CB_a_y = t(t(CB_a_datapoints$y))
+
+dfa_y = fx(dfa)
+
+dataframe = data.frame( x, fvalues )
+
+
+ggplot(data = dataframe, mapping = aes(x = x, y = fvalues)) + 
+  geom_line() + 
+  geom_point(aes(x=dfa[1,], y=dfa_y[1,]), colour="green") +
+  geom_label_repel(data = data.frame(c(dfa[1,])), mapping = aes(x = dfa[1,], y = dfa_y[1,], label = "0"), vjust = -30, segment.size = 1.0) +
+  geom_point(aes(x=dfa[2,], y=dfa_y[2,]), colour="green") +
+  geom_label_repel(data = data.frame(c(dfa[2,])), mapping = aes(x = dfa[2,], y = dfa_y[2,], label = "0"), vjust = -30, segment.size = 1.0) +
+  geom_point(aes(x=dfa[3,], y=dfa_y[3,]), colour="green") +
+  geom_label_repel(data = data.frame(c(dfa[3,])), mapping = aes(x = dfa[3,], y = dfa_y[3,], label = "0"), vjust = -30, segment.size = 1.0) +
+  geom_point(aes(x=dfa[4,], y=dfa_y[4,]), colour="green") +
+  geom_label_repel(data = data.frame(c(dfa[4,])), mapping = aes(x = dfa[4,], y = dfa_y[4,], label = "0"), vjust = -30, segment.size = 1.0) +
+  geom_point(aes(x=dfa[5,], y=dfa_y[5,]), colour="green") +
+  geom_label_repel(data = data.frame(c(dfa[5,])), mapping = aes(x = dfa[5,], y = dfa_y[5,], label = "0"), vjust = -30, segment.size = 1.0) +
+  geom_point(aes(x=EI_a_x[1,], y=EI_a_y[1,]), colour="blue") +
+  geom_label_repel(data = data.frame(c(EI_a_x[1,])), mapping = aes(x = EI_a_x[1,], y = EI_a_y[1,], label = "1"), vjust = -1.5, segment.size = 1.0, segment.color = "blue") +
+  geom_point(aes(x=EI_a_x[2,], y=EI_a_y[2,]), colour="blue") + 
+  geom_label_repel(data = data.frame(c(EI_a_x[1,])), mapping = aes(x = EI_a_x[2,], y = EI_a_y[2,], label = "2"), vjust = -1.5, segment.size = 1.0, segment.color = "blue") +
+  geom_point(aes(x=EI_a_x[3,], y=EI_a_y[3,]), colour="blue") + 
+  geom_label_repel(data = data.frame(c(EI_a_x[1,])), mapping = aes(x = EI_a_x[3,], y = EI_a_y[3,], label = "3"), vjust = -2.5, segment.size = 1.0, segment.color = "blue") +
+  geom_point(aes(x=EI_a_x[4,], y=EI_a_y[4,]), colour="blue") + 
+  geom_label_repel(data = data.frame(c(EI_a_x[1,])), mapping = aes(x = EI_a_x[4,], y = EI_a_y[4,], label = "4"), vjust = -1.5, segment.size = 1.0, segment.color = "blue") +
+  geom_point(aes(x=EI_a_x[5,], y=EI_a_y[5,]), colour="blue") + 
+  geom_label_repel(data = data.frame(c(EI_a_x[1,])), mapping = aes(x = EI_a_x[5,], y = EI_a_y[5,], label = "5"), vjust = -1.5, segment.size = 1.0, segment.color = "blue") +
+  geom_point(aes(x=EI_a_x[6,], y=EI_a_y[6,]), colour="blue") + 
+  geom_label_repel(data = data.frame(c(EI_a_x[1,])), mapping = aes(x = EI_a_x[6,], y = EI_a_y[6,], label = "6"), vjust = -1.5, segment.size = 1.0, segment.color = "blue") +
+  geom_point(aes(x=EI_a_x[7,], y=EI_a_y[7,]), colour="blue") + 
+  geom_label_repel(data = data.frame(c(EI_a_x[1,])), mapping = aes(x = EI_a_x[7,], y = EI_a_y[7,], label = "7"), vjust = -3.5, segment.size = 1.0, segment.color = "blue") +
+  geom_point(aes(x=EI_a_x[8,], y=EI_a_y[8,]), colour="blue") + 
+  geom_label_repel(data = data.frame(c(EI_a_x[1,])), mapping = aes(x = EI_a_x[8,], y = EI_a_y[8,], label = "8"), vjust = -1.5, segment.size = 1.0, segment.color = "blue") +
+  geom_point(aes(x=EI_a_x[9,], y=EI_a_y[9,]), colour="blue") + 
+  geom_label_repel(data = data.frame(c(EI_a_x[1,])), mapping = aes(x = EI_a_x[9,], y = EI_a_y[9,], label = "9"), vjust = -1.5, segment.size = 1.0, segment.color = "blue") +
+  geom_point(aes(x=EI_a_x[10,], y=EI_a_y[10,]), colour="blue") + 
+  geom_label_repel(data = data.frame(c(EI_a_x[1,])), mapping = aes(x = EI_a_x[10,], y = EI_a_y[10,], label = "10"), vjust = -1.5, segment.size = 1.0, segment.color = "blue") + 
+  geom_point(aes(x=CB_a_x[1,], y=CB_a_y[1,]), colour="red") +
+  geom_label_repel(data = data.frame(c(CB_a_x[1,])), mapping = aes(x = CB_a_x[1,], y = CB_a_y[1,], label = "1"), vjust = 3.0, hjust = 5.5, segment.size = 1.0, segment.color = "red") +
+  geom_point(aes(x=CB_a_x[2,], y=CB_a_y[2,]), colour="red") + 
+  geom_label_repel(data = data.frame(c(CB_a_x[1,])), mapping = aes(x = CB_a_x[2,], y = CB_a_y[2,], label = "2"), vjust = 0.0, hjust = -5.0, segment.size = 1.0, segment.color = "red") +
+  geom_point(aes(x=CB_a_x[3,], y=CB_a_y[3,]), colour="red") + 
+  geom_label_repel(data = data.frame(c(CB_a_x[1,])), mapping = aes(x = CB_a_x[3,], y = CB_a_y[3,], label = "3"), vjust = 1.5, hjust = 8.0, segment.size = 1.0, segment.color = "red") +
+  geom_point(aes(x=CB_a_x[4,], y=CB_a_y[4,]), colour="red") + 
+  geom_label_repel(data = data.frame(c(CB_a_x[1,])), mapping = aes(x = CB_a_x[4,], y = CB_a_y[4,], label = "4"), vjust = 1.5, segment.size = 1.0, segment.color = "red") +
+  geom_point(aes(x=CB_a_x[5,], y=CB_a_y[5,]), colour="red") + 
+  geom_label_repel(data = data.frame(c(CB_a_x[1,])), mapping = aes(x = CB_a_x[5,], y = CB_a_y[5,], label = "5"), vjust = 3.0, hjust = 2.5, segment.size = 1.0, segment.color = "red") +
+  geom_point(aes(x=CB_a_x[6,], y=CB_a_y[6,]), colour="red") + 
+  geom_label_repel(data = data.frame(c(CB_a_x[1,])), mapping = aes(x = CB_a_x[6,], y = CB_a_y[6,], label = "6"), vjust = 0.0, hjust = 5.5, segment.size = 1.0, segment.color = "red") +
+  geom_point(aes(x=CB_a_x[7,], y=CB_a_y[7,]), colour="red") + 
+  geom_label_repel(data = data.frame(c(CB_a_x[1,])), mapping = aes(x = CB_a_x[7,], y = CB_a_y[7,], label = "7"), vjust = -2.0, hjust = -8.0, segment.size = 1.0, segment.color = "red") +
+  geom_point(aes(x=CB_a_x[8,], y=CB_a_y[8,]), colour="red") + 
+  geom_label_repel(data = data.frame(c(CB_a_x[1,])), mapping = aes(x = CB_a_x[8,], y = CB_a_y[8,], label = "8"), vjust = -3.5, hjust = -8.0, segment.size = 1.0, segment.color = "red") +
+  geom_point(aes(x=CB_a_x[9,], y=CB_a_y[9,]), colour="red") + 
+  geom_label_repel(data = data.frame(c(CB_a_x[1,])), mapping = aes(x = CB_a_x[9,], y = CB_a_y[9,], label = "9"), vjust = -0.5, hjust = -8.0, segment.size = 1., segment.color = "red") +
+  geom_point(aes(x=CB_a_x[10,], y=CB_a_y[10,]), colour="orange") + 
+  geom_label_repel(data = data.frame(c(CB_a_x[1,])), mapping = aes(x = CB_a_x[10,], y = CB_a_y[10,], label = "10"), vjust = 3.5, hjust = -5.0, segment.size = 1.0, segment.color = "orange") 
+
+
+```
+### Interpretation
+
+CB(rot) wertet vor allem mittig in der Nähe des Optimums aus, während EI (blau) den Suchraum breiter abdeckt.
+Dabei fällt allerdings auf, dass häufig an lokalen Maxima ausgewertet wurde. Woran das liegen könnte, oder ob das in diesem Fall reiner Zufall ist, ist unklar.
+Von diesem Einzelfall ausgehend, würde ich vermuten, dass CB "robuster", weil es den Suchraum systematischer untersucht. EI dagegen wirkt "dynamisch", was potentiell zu besseren Lösung führen könnte, aber das Risiko birgt, bessere Lösungen komplett zu übersehen.
+
+Dass beide Varianten genau dieses lokale Optimum finden, liegt höchstwahrscheinlich aber auch daran, dass ein Punkt des initialen Designs knapp daneben lag. 
+
+Alternativ kann hier der Verlauf der Optimierung betractet werden.
+Für EI:
+
+```{r, echo=FALSE}
+library(grid)
+library(gridExtra)
+plot(run_EI_a)
+```
+Für CB:
+```{r, echo=FALSE}
+plot(run_CB_a)
+```
+
+
+
+### Plot der b)
+
+####EI:
+```{r, echo=FALSE}
+library(akima)
+library(reshape2)
+plot(run_EI_b)
+```
+####CB:
+```{r, echo=FALSE}
+plot(run_CB_b)
+```
+
+Oder alternativ im 3D-Plot, der hier leider nicht angezeigt werden kann.
+
+ ```{r, ech0=FALSE}
+# library("rgl")
+# x = rep(x = c(-40:40)/4, times = 84)
+# y = rep(-40:40, each = 84)/4
+# z = t(t(fxy(x, y)))
+# EI_b_datapoints = print(run_EI_b)
+# EI_b_x = t(t(EI_b_datapoints$x1))
+# EI_b_y = t(t(EI_b_datapoints$x2))
+# EI_b_z = t(t(EI_b_datapoints$y))
+# EI_b = cbind(EI_b_x, EI_b_y, EI_b_z)
+# 
+# CB_b_datapoints = print(run_CB_b)
+# CB_b_x = t(t(CB_b_datapoints$x1))
+# CB_b_y = t(t(CB_b_datapoints$x2))
+# CB_b_z = t(t(CB_b_datapoints$y))
+# CB_b = cbind(CB_b_x, CB_b_y, CB_b_z)
+# 
+# 
+# dfb$z = fxy(dfb[,1], dfb[,2])
+# 
+# dataframe = data.frame( x, y, z )
+# 
+# plot3d(dataframe, col = "grey")
+# points3d(dfb, size = 6, col = "black")
+# text3d(dfb, texts = 0)
+# points3d(EI_b, size = 6, col="red")
+# text3d(EI_b, texts = 6:15)
+# points3d(CB_b[1:9,], size = 6, col="blue")
+# text3d(CB_b[1:9,], texts = 6:14)
+# points3d(x=CB_b[10,1], y=CB_b[10,2], z=CB_b[10,3], size = 12, col = "green")
+# text3d(CB_b[10,], texts = 15)
+
+```
+
+## Erklärung der Infill-Kriterien
+
+### Lower Confidence Bound
+
+Bei LCB zieht man vom Punktschätzer an der Stelle x die entsprechende Unsicherheit mal einen Hyperparameter $\kappa$ ab.
+```{r}
+comp_LCB = function(f_dach,s_dach,kappa=1){
+  LCB = f_dach - kappa * s_dach
+  return(LCB)
+}
+```
+Wir lesen nun aus dem Data Frame die Werte mean und se aus und vergleichen unser Ergebnis mit dem in der Spalte cb.
+
+```{r}
+#print(run_CB_a)
+
+comp_LCB(-1.7029,7.8270) == -9.5299
+#Tabelle: -9.5299
+
+comp_LCB(-5.716831,2.35961483)
+#Tabelle: -8.076446
+
+comp_LCB(-7.615328,6.73106941)
+#Tabelle: -14.346
+
+```
+Passt.
+
+#### Expected Improvement
+Hier kommt eine Normalverteilungsannahme hinzu. EI berechent sich wie folgt:
+```{r}
+comp_EI = function(f_dach,f_min,s_dach){
+  u = (f_min - f_dach) / s_dach
+  eI = s_dach * (u * pnorm(u) + dnorm(u))
+  return(eI)
+}
+
+```
+
+Wir lesen wieder mean und se aus der Tablle aus. Der kleinste bisher gefunde Funktionswert stammt aus dem initialen Design.
+```{r}
+#print(run_EI_a)
+
+min= min(fx(lhsa_sc))
+
+comp_EI(-0.84258,min,8.6198)
+#Tabelle: 1.576645
+
+comp_EI(-6.8222524,min,3.757011)
+#Tabelle: 2.200875
+
+comp_EI(24.8654400,min,27.026855)
+#Tabelle: -1.7594348
+```
+
+Die Ergebnisse stimmen hier betragsmäßig überein, allerdings mit umgedrehtem Vorzeichen.
+
+Das könnte daran liegen, dass wir standartmäßig Minimieren. In diesem Kontext ist eine "erwartete Verbesserung" in negativer Richtung zu verstehen.
+

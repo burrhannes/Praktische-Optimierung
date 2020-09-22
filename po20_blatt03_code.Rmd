@@ -1,0 +1,212 @@
+---
+title: "Blatt03"
+author: "Henri Lübeck; Tobias Janßen; Johannes Burr"
+date: "10 5 2020"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+```{r}
+source("po20_blatt03_code.R")
+
+library("microbenchmark")
+library("checkmate")
+
+
+t1 = c(rep.int(0,500))
+t2 = c(rep.int(0,500))
+t3 = c(rep.int(0,500))
+t4 = c(rep.int(0,500))
+
+set.seed(123)
+for (i in 1:500) {
+  a = runif(1,min=-10,max=10)
+  b = runif(1,min=-10,max=10)
+  x_nul=c(a,b)
+  
+  res1 = microbenchmark( kompasssuche2(f,x0=x_nul,s=1,theta=0.5),times=100, unit = "ms")
+  t1[i] = summary(res1)$median
+  
+  res2 = microbenchmark( kompasssuche2(f,x0=x_nul,s=2,theta=0.5),times=100, unit = "ms")
+  t2[i] = summary(res2)$median
+  
+  res3 = microbenchmark( kompasssuche2(f,x0=x_nul,s=1.5,theta=0.8),times=100, unit = "ms")
+  t3[i] = summary(res3)$median
+  
+  res4 = microbenchmark( kompasssuche2(f,x0=x_nul,s=0.5,theta=0.2),times=100, unit = "ms")
+  t4[i] = summary(res4)$median
+
+
+}
+
+
+
+save(t1,file="t1.RData")
+save(t2,file="t2.RData")
+save(t3,file="t3.RData")
+save(t4,file="t4.RData")
+
+
+boxplot(t1,t2,t3,t4,
+        xlab="Parameter", ylab="Time [ms]",
+        names=c("1;0.5","2;0.5","1.5;0.8","0.5;0.2"))
+
+```
+
+
+Die erste Parameter-Kombination funktioniert am zweit besten, mit einem leicht höheren Median und stärkerer Streuung als die zweite Variante.
+
+Die zweite Parameter-Kombination benötigt im Mittel am wenigsten Zeit und hat die geringste Streung.
+
+Die dritte Parameter-Kombination ist eindeutig die schlechteste mit einem Median von 1.49335, der über den oberen Quantilen der ersten beiden Varianten liegt.
+
+Bei der vierten Parameter-Kombination ist die große Streuung hervorzuheben. Im Median liegt diese Variante zwischen 1&2 und 3, wobei einige Läufe sogar schneller als in den ersten beiden Varianten sind, andere Läufe aber auch schlechter als ein Großteil derer der dritten Variante.
+
+## Vorraussetzungen für die Tests
+
+
+t-Test:
+
+- unabhängige Stichproben:
+  wegen der Pseudozufallszahlen garantiert
+
+- stetig & normalverteilt:
+  gemessene Einheit (Zeit) ist stetig
+  Prüfung auf Normalverteilung durch QQ-Plots
+
+- Homoskedastizität:
+  F-Test auf gleiche Varianzen
+  
+
+Wilcoxon-Rangsummen-Test:
+
+- stetiges Merkmal:
+  gemessene Einheit (Zeit) ist Stetig
+
+- gleiche Verteilungsform in beiden Stichproben:
+  Durch QQ-Plots geprüft
+  Wenn sich die Varianzen zu sehr unterscheiden, wird der Test zu liberal (Hayes, 2000)
+
+Vorraussetzung nach: Eid, Gollwitzer, Schmitt (2010)
+
+
+```{r}
+qqnorm(t1, 
+       xlab="Theoretical Quantils", 
+       ylab="Sample Quantils",
+       main="Q-Q-Plot")
+qqline(t1,distribution=qnorm)
+
+qqnorm(t2,
+       xlab="Theoretical Quantils", 
+       ylab="Sample Quantils",
+       main="Q-Q-Plot")
+qqline(t2,distribution=qnorm)
+
+qqnorm(t3,
+       xlab="Theoretical Quantils", 
+       ylab="Sample Quantils",
+       main="Q-Q-Plot")
+qqline(t3,distribution=qnorm)
+
+qqnorm(t4,
+       xlab="Theoretical Quantils", 
+       ylab="Sample Quantils",
+       main="Q-Q-Plot")
+qqline(t4,distribution=qnorm)
+
+```
+
+Im QQ-Plot werden die theoretischen Quantile gegenüber den empirischen Quantilen abgeglichen. Je näher die Punkte an der Einheitsgrade liegen, desto eher stimmen beide überein. Eine kleine Abweichung an den Extremwerten ist üblich.
+
+Die Plots zeigen, das eine Normalverteilungsannahme gerechtfertig ist, wobei man beim Vierten aufpassen sollte.
+=> die Ergebnisse sind alle normalverteilt und haben somit die selbe Verteilungsform
+
+```{r}
+var.test(t1, t3, alternative = "two.sided")
+var.test(t3, t4, alternative = "two.sided")
+var.test(t2, t4, alternative = "two.sided")
+var.test(t1, t4, alternative = "two.sided")
+
+```
+
+Bei allen F-Tests wird die Nullhypothese bei einem Signifikanzniveau von 5% verworfen. Damit sind die Varianzen zur Irrtumswahrscheinlichkeit von 5% verschieden. Damit ist die Homoskedastizitätsverraussetzung des t-Tests nicht erfüllt.
+
+
+
+```{r}
+
+#Tests zu t1 und t3
+t.test(t1,t3,alternative="less")
+wilcox.test(t1,t3,alternative="less")
+
+#Tests zu t3 und t4
+t.test(t3,t4,alternative="less")
+wilcox.test(t3,t4,alternative="less")
+
+#Tests zu t2 und t4
+t.test(t2,t4,alternative="less")
+wilcox.test(t2,t4,alternative="less")
+
+#Tests zu t1 und t4
+t.test(t1,t4,alternative="less")
+wilcox.test(t1,t4,alternative="less")
+
+
+
+
+
+```
+
+
+Der t-Test und der Wilcoxon-Rangsummen-Test kommen bei allen 4 Fällen zur gleichen Testentscheidung
+
+Fall1:
+Die erste Parameterkombination ist im Mittel signifikant schneller als die dritte.
+
+Fall2: 
+Die dritte Parameterkombination ist nicht signifikant schneller als die vierte und somit wird die Nullhypothese nicht verworfen.
+
+Fall3:
+Die zweite Parameterkombination ist signifikant schneller als die vierte.
+
+Fall4:
+Die erste Parameterkombination ist signifikant schneller als die vierte.
+
+
+# Aufgabe 2
+
+$\Phi$ sei ein Test für das beschriebene Testproblem.
+Weil es ein Test zum Niveau $\alpha$ ist, muss die Gütefunktion auf ganz $\Theta \setminus \theta_0 < \alpha$ sein.
+Sollte der Test für H1, also an der Stelle $\theta_0$, eine Güte$>\alpha$ haben,
+müsste die Gütefunktion hier sprunghaft an- und direkt wieder absteigen.
+Dann kann die Gütefunktion aber nicht stetig sein, was dem Hinweis widerspricht.
+
+Inhaltlich bedeutet das zuerst einmal, dass ein sinnvoller Test auf Gleichheit nicht möglich ist. Allgemein ist es nicht möglich eine $\H1$ mit nur genau einem Punkt zu formulieren.
+Erweiternd könnte man den Bezug zu Popper herstellenm Falszifikationismus nach Popper ziehen, wonach positivistisches Testen grundsätzlich unmögich ist.
+
+# Aufgabe 3
+a) Nein, die nachzuweisende Aussage sollte als $H_1$ formuliert werden.
+Wird $H_0$ tatsächlich verworfen, kann man mit der Irrtumswahrscheinlichkeit alpha
+annehmen, dass $H_1$ stimmt (Weil der Test entweder die korrekte Entscheidung trifft oder mit alpha den Fehler 1. Art begeht).
+Andersrum gilt das nicht. Wenn $H_0$ nicht verworfen werden kann, kann man im Grunde keine Aussage machen. Das wahre theta kann sowohl aus $\Theta_1$ wie auch $\Theta_0$ kommen.Die Irrtumswahrscheinlichkeit ist nicht bezifferbar, weil man den Fehler 2. Art nicht kontrollieren kann.
+
+
+b) Nein, sie kann nicht sicher sein, dass eine Normalverteilung vorliegt, 
+was an oben beschriebenem Fehler 2. Art liegt, der nicht kontrolliert werden kann.
+Das gilt ebenso bei p=0.8. Der p-value darf (streng genommen) nicht als Indikator
+der Evidenz interpretiert werden.
+
+c) Nein. Signifikanz und Relevanz sind zwei verschiedene Dinge. 
+Wissenschaftliche Relevanz basiert zwar häufig auf statistischer Signifikanz,
+andersrum ist dies aber nicht der Fall. 
+Es dürfte sich leicht zeigen lassen, dass das Coronavirus signifikant kleiner
+als zB eine Biene ist. Publiziert wird diese Erkenntnis aber bestimmt nicht,
+weil es keinen Beitrag dazu leistet, die Pandemie nachzuverfolgen.
+Was wissenschaftliche Relevanz besitzt, muss immer wieder abgewogen werden und ist
+recht sicher nicht bezifferbar.
